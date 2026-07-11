@@ -3,10 +3,31 @@ const mongoose = require("mongoose")
 const cors = require("cors")
 const dotenv = require("dotenv")
 const http = require("http")
-const { Server } = require("socket.io")
+const initSocket = require("./socket")
+const logger = require("./utils/logger")
+const errorHandler = require("./middleware/errorMiddleware")
+const AppError = require("./utils/appError")
 
 // Load environment variables from .env file
 dotenv.config()
+
+// --- ENVIRONMENT VARIABLE VALIDATION (FAIL-FAST) ---
+const requiredEnvVars = ["MONGO_URI", "JWT_SECRET"]
+const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName])
+
+if (missingEnvVars.length > 0) {
+    logger.error("================================================================================")
+    logger.error("CRITICAL STARTUP ERROR: Missing required environment configuration.")
+    logger.error(`The following environment variables are missing: ${missingEnvVars.join(", ")}`)
+    logger.error("================================================================================")
+    logger.error("HOW TO RESOLVE:")
+    logger.error("1. Create a '.env' file in the 'backend' folder.")
+    logger.error("2. Add the missing environment variables as defined in the README.md file:")
+    logger.error("   MONGO_URI=mongodb+srv://<username>:<password>@cluster...")
+    logger.error("   JWT_SECRET=your_long_random_jwt_signing_key_here")
+    logger.error("================================================================================")
+    process.exit(1)
+}
 
 const app = express()
 const server = http.createServer(app)
@@ -14,84 +35,52 @@ const server = http.createServer(app)
 // --- MIDDLEWARE ---
 app.use(
     cors({
-        origin: "*", // Allows your frontend to connect
+        origin: "*", // In production, this should be restricted to specific allowed domains
         methods: ["GET", "POST", "PUT", "DELETE"],
     }),
 )
 app.use(express.json())
 
-// --- MONGODB CONNECTION ---
+// --- MONGODB CONNECTION & RESILIENCE ---
 const mongoURI = process.env.MONGO_URI
 
-mongoose
-    .connect(mongoURI)
-    .then(() => console.log("✅ Connected to MongoDB Atlas!"))
-    .catch((err) => console.error("❌ MongoDB connection error:", err))
+mongoose.connection.on("connected", () => {
+    logger.info("✅ Connected to MongoDB Atlas successfully!")
+})
 
-// --- ROUTES ---
-// Note: Ensure these paths match your actual route files!
+mongoose.connection.on("error", (err) => {
+    logger.error("❌ MongoDB connection error event:", err)
+})
+
+mongoose.connection.on("disconnected", () => {
+    logger.warn("⚠️ MongoDB connection disconnected. Attempting automatic reconnection...")
+})
+
+// Mongoose automatically handles connection retry logic, but logging helps operators monitor it
+mongoose.connect(mongoURI).catch((err) => {
+    logger.error("❌ Initial MongoDB connection failure:", err)
+})
+
+// --- API ROUTES ---
 app.use("/api/auth", require("./routes/auth"))
 app.use("/api/workspaces", require("./routes/workspace"))
 app.use("/api/channels", require("./routes/channel"))
 app.use("/api/messages", require("./routes/message"))
 
+// Unmatched routes fallback
+app.use((req, res, next) => {
+    next(new AppError(`Route ${req.method} ${req.originalUrl} not found on this server`, 404))
+})
+
+// --- GLOBAL ERROR HANDLING MIDDLEWARE ---
+// Handles all synchronous/asynchronous errors caught by Express or our asyncHandler wrapper
+app.use(errorHandler)
+
 // --- SOCKET.IO SETUP ---
-const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-    },
-})
-
-// The "Guestbook" to track who is currently online
-const onlineUsers = new Map()
-
-io.on("connection", (socket) => {
-    console.log(`User connected: ${socket.id}`)
-
-    // 1. Join a specific channel room
-    socket.on("join_channel", (channelId) => {
-        socket.join(channelId)
-    })
-
-    // 2. Handle sending messages instantly
-    socket.on("send_message", (data) => {
-        socket.to(data.channelId).emit("receive_message", data)
-    })
-
-    // 3. Handle "Typing..." indicators
-    socket.on("typing", (data) => {
-        socket.to(data.channelId).emit("user_typing", data.username)
-    })
-
-    socket.on("stop_typing", (channelId) => {
-        socket.to(channelId).emit("user_stopped_typing")
-    })
-
-    // 4. Handle "Green Dot" online status
-    socket.on("register_user", (userId) => {
-        onlineUsers.set(socket.id, userId)
-        // Broadcast the unique list of online user IDs to everyone
-        io.emit("online_users", Array.from(new Set(onlineUsers.values())))
-    })
-
-    // 5. NEW: Handle deleting messages instantly
-    socket.on("delete_message", (data) => {
-        // Tell everyone else in the channel to remove this specific message ID
-        socket.to(data.channelId).emit("message_deleted", data.messageId)
-    })
-
-    // 6. Handle user disconnecting (closing the tab/browser)
-    socket.on("disconnect", () => {
-        console.log(`User disconnected: ${socket.id}`)
-        onlineUsers.delete(socket.id)
-        // Update everyone's screen to remove the green dot for this user
-        io.emit("online_users", Array.from(new Set(onlineUsers.values())))
-    })
-})
+initSocket(server)
 
 // --- START SERVER ---
-const PORT = process.env.PORT || 10000 // Render prefers 10000, fallback to 5000
+const PORT = process.env.PORT || 10000 // Render prefers 10000, fallback to 5000 is typical but 10000 is used here
 server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`)
+    logger.info(`🚀 Server is running on port ${PORT}`)
 })
