@@ -1,7 +1,6 @@
 import { useState } from "react"
-import axios from "axios"
+import apiClient from "./utils/apiClient"
 import { motion } from "motion/react"
-import { API_BASE } from "./config"
 import { fadeContainer, fadeItem, listRow } from "./motionVariants"
 
 function Auth({ onLogin }) {
@@ -20,13 +19,13 @@ function Auth({ onLogin }) {
         setLoading(true)
         try {
             if (isLogin) {
-                const res = await axios.post(`${API_BASE}/api/auth/login`, {
+                const res = await apiClient.post("/api/auth/login", {
                     email,
                     password,
                 })
                 onLogin(res.data.token, res.data.user?.username)
             } else {
-                await axios.post(`${API_BASE}/api/auth/register`, {
+                await apiClient.post("/api/auth/register", {
                     username,
                     email,
                     password,

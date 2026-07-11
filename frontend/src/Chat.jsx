@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import axios from "axios"
+import apiClient from "./utils/apiClient"
 import io from "socket.io-client"
 import { AnimatePresence, motion } from "motion/react"
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
@@ -57,10 +57,7 @@ function Chat({ token, onLogout, storedUsername = "" }) {
         return "Member"
     }, [storedUsername, activeWorkspace, currentUserId])
 
-    const axiosConfig = useMemo(
-        () => ({ headers: { Authorization: `Bearer ${token}` } }),
-        [token],
-    )
+
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -79,9 +76,8 @@ function Chat({ token, onLogout, storedUsername = "" }) {
             if (!opts.skipNav) navigate("/chat", { replace: false })
             setActiveChannel(channel)
             try {
-                const msgRes = await axios.get(
-                    `${API_BASE}/api/messages/${channel._id}`,
-                    axiosConfig,
+                const msgRes = await apiClient.get(
+                    `/api/messages/${channel._id}`
                 )
                 setMessages(msgRes.data)
                 socket.emit("join_channel", channel._id)
@@ -89,7 +85,7 @@ function Chat({ token, onLogout, storedUsername = "" }) {
                 console.error("Error loading messages", err)
             }
         },
-        [axiosConfig, navigate],
+        [navigate],
     )
 
     const loadWorkspaceData = useCallback(
@@ -97,9 +93,8 @@ function Chat({ token, onLogout, storedUsername = "" }) {
             if (!opts.skipNav) navigate("/chat", { replace: false })
             setActiveWorkspace(workspace)
             try {
-                const chRes = await axios.get(
-                    `${API_BASE}/api/channels/${workspace._id}`,
-                    axiosConfig,
+                const chRes = await apiClient.get(
+                    `/api/channels/${workspace._id}`
                 )
                 setChannels(chRes.data)
 
@@ -115,14 +110,14 @@ function Chat({ token, onLogout, storedUsername = "" }) {
                 console.error("Error loading workspace data", err)
             }
         },
-        [axiosConfig, loadChannelData, navigate],
+        [loadChannelData, navigate],
     )
 
     const refreshWorkspaces = useCallback(async () => {
-        const wsRes = await axios.get(`${API_BASE}/api/workspaces`, axiosConfig)
+        const wsRes = await apiClient.get("/api/workspaces")
         setWorkspaces(wsRes.data)
         return wsRes.data
-    }, [axiosConfig])
+    }, [])
 
     useEffect(() => {
         let cancelled = false
@@ -130,9 +125,8 @@ function Chat({ token, onLogout, storedUsername = "" }) {
         const bootstrap = async () => {
             setBootstrapping(true)
             try {
-                const wsRes = await axios.get(
-                    `${API_BASE}/api/workspaces`,
-                    axiosConfig,
+                const wsRes = await apiClient.get(
+                    "/api/workspaces"
                 )
                 if (cancelled) return
                 setWorkspaces(wsRes.data)
@@ -182,7 +176,7 @@ function Chat({ token, onLogout, storedUsername = "" }) {
             socket.off("online_users")
             socket.off("message_deleted")
         }
-    }, [token, currentUserId, axiosConfig, loadWorkspaceData])
+    }, [token, currentUserId, loadWorkspaceData])
 
     const openModal = (type) => {
         setModalInput("")
@@ -212,10 +206,9 @@ function Chat({ token, onLogout, storedUsername = "" }) {
         if (!name) return
         setModalBusy(true)
         try {
-            await axios.post(
-                `${API_BASE}/api/workspaces`,
-                { name },
-                axiosConfig,
+            await apiClient.post(
+                "/api/workspaces",
+                { name }
             )
             const list = await refreshWorkspaces()
             if (list.length > 0) {
@@ -235,10 +228,9 @@ function Chat({ token, onLogout, storedUsername = "" }) {
         if (!joinId) return
         setModalBusy(true)
         try {
-            await axios.post(
-                `${API_BASE}/api/workspaces/join`,
-                { workspaceId: joinId },
-                axiosConfig,
+            await apiClient.post(
+                "/api/workspaces/join",
+                { workspaceId: joinId }
             )
             const list = await refreshWorkspaces()
             const joined =
@@ -269,10 +261,9 @@ function Chat({ token, onLogout, storedUsername = "" }) {
         if (!channelName) return
         setModalBusy(true)
         try {
-            await axios.post(
-                `${API_BASE}/api/channels/${activeWorkspace._id}`,
-                { name: channelName },
-                axiosConfig,
+            await apiClient.post(
+                `/api/channels/${activeWorkspace._id}`,
+                { name: channelName }
             )
             await loadWorkspaceData(activeWorkspace)
             closeModal()
@@ -286,9 +277,8 @@ function Chat({ token, onLogout, storedUsername = "" }) {
     const handleDeleteMessage = async (messageId) => {
         setModalBusy(true)
         try {
-            await axios.delete(
-                `${API_BASE}/api/messages/${messageId}`,
-                axiosConfig,
+            await apiClient.delete(
+                `/api/messages/${messageId}`
             )
             setMessages((prev) => prev.filter((msg) => msg._id !== messageId))
             socket.emit("delete_message", {
@@ -335,10 +325,9 @@ function Chat({ token, onLogout, storedUsername = "" }) {
         socket.emit("stop_typing", activeChannel._id)
 
         try {
-            const res = await axios.post(
-                `${API_BASE}/api/messages`,
-                { content: text, channelId: activeChannel._id },
-                axiosConfig,
+            const res = await apiClient.post(
+                "/api/messages",
+                { content: text, channelId: activeChannel._id }
             )
 
             const savedMessage = res.data
