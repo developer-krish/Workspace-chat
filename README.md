@@ -1,27 +1,42 @@
 # Workspace Chat
 
-A full-stack workspace chat application: create workspaces, invite members, organize channels, and message in real time. The UI is built with **Vite**, **React**, **Tailwind CSS v4**, and **Motion**; the API uses **Node.js**, **Express**, **MongoDB**, **JWT** authentication, and **Socket.io** for live updates.
+A production-grade full-stack workspace chat application: create workspaces, invite members, organize channels, and message in real time. The frontend is built with **Vite**, **React**, **Tailwind CSS v4**, and **Motion**; the backend is powered by **Node.js**, **Express**, **MongoDB**, **JWT** sessions, and **Socket.io** for real-time synchronization.
 
 ---
 
-## Repository layout
+## Repository Layout
 
 ```
 Chatting-application/
 ├── backend/
+│   ├── controllers/            # Controller handlers separating route logic
+│   │   ├── authController.js
+│   │   ├── channelController.js
+│   │   ├── messageController.js
+│   │   └── workspaceController.js
 │   ├── middleware/
-│   │   └── authMiddleware.js
-│   ├── models/
+│   │   ├── asyncHandler.js     # Global async error catcher
+│   │   ├── authMiddleware.js   # JWT validator
+│   │   ├── errorMiddleware.js  # Centralized error formatter
+│   │   ├── validate.js         # Zod request payload schema validator
+│   │   └── workspaceMiddleware.js # Workspace security boundary validator
+│   ├── models/                 # Mongoose schemas with database indexes
 │   │   ├── Channel.js
 │   │   ├── Message.js
 │   │   ├── User.js
 │   │   └── Workspace.js
-│   ├── routes/
+│   ├── routes/                 # Explicit route declarations
 │   │   ├── auth.js
 │   │   ├── channel.js
 │   │   ├── message.js
 │   │   └── workspace.js
-│   ├── server.js              # HTTP + Socket.io entry
+│   ├── utils/
+│   │   ├── appError.js         # Operational error helper class
+│   │   └── logger.js           # Standardized logger
+│   ├── validation/
+│   │   └── schemas.js          # Zod schema definitions
+│   ├── socket.js               # Modular socket.io connection logic
+│   ├── server.js               # Express + HTTP entrypoint
 │   └── package.json
 ├── frontend/
 │   ├── index.html
@@ -31,31 +46,35 @@ Chatting-application/
 │       ├── components/
 │       │   └── LoadingScreen.jsx
 │       ├── pages/
-│       │   ├── About.jsx      # In-app project story / docs
+│       │   ├── About.jsx
 │       │   ├── ChatMessagesView.jsx
-│       │   └── Team.jsx       # Placeholder for team credits
+│       │   └── Team.jsx
 │       ├── utils/
-│       │   └── chatTime.js    # Relative times, day dividers
-│       ├── App.jsx
-│       ├── Auth.jsx
-│       ├── Chat.jsx           # Sidebar, socket state, modals, <Outlet />
-│       ├── config.js          # VITE_API_URL → API base
-│       ├── index.css          # Tailwind @import + @theme
-│       ├── main.jsx
+│       │   ├── apiClient.js    # Custom Axios client with request/response interceptors
+│       │   └── chatTime.js
+│       ├── App.jsx             # State router & route guards
+│       ├── Auth.jsx            # Register/Login view (uses apiClient)
+│       ├── Chat.jsx            # Main chat workspace layout
+│       ├── config.js           # Endpoint loader
+│       ├── index.css
+│       ├── main.jsx            # Boots React App wrapped in BrowserRouter
 │       └── motionVariants.js
 └── README.md
 ```
 
 ---
 
-## Features (high level)
+## Key Refactoring & Security Hardening
 
-- Register, log in, JWT sessions
-- Workspaces with invite IDs, channels, member list
-- Real-time messages, typing indicators, online presence
-- Delete own messages (with socket sync)
-- Frontend routes: `/chat`, `/about`, `/team` (same visual theme)
-- Client-side channel message search, relative timestamps, day separators, copy message, jump-to-latest when scrolled up, **Esc** closes modals
+This project has been restructured following principal-level software engineering guidelines:
+1. **Workspace Access Boundaries**: Users can only read channels or load/post messages if they are registered members of that workspace. Enforced via `workspaceMiddleware.js`.
+2. **Message Deletion Guard**: Message deletion requests `/api/messages/:id` now verify ownership. Only the message sender can delete it.
+3. **Structured Validation**: Leverages **Zod** schemas in `backend/validation/schemas.js` to validate incoming requests, helping block NoSQL injection vectors.
+4. **Resilient MongoDB Lifecycle**: Set up reconnect and drop handlers to manage MongoDB connection transitions.
+5. **Fail-Fast Bootstrapping**: Validates environment variables (`MONGO_URI`, `JWT_SECRET`) on startup, halting compilation and providing clear setup instructions if missing.
+6. **Centralized Error Flow**: Async handlers are wrapped in `asyncHandler` to delegate errors to the centralized `errorMiddleware`, preventing raw server details from leaking to clients in production.
+7. **Database Indexes**: Configured single and compound indexes on key fields (`Workspace.members`, `Channel.workspace`, `Message.channel`, and `Message.createdAt`) to optimize queries under load.
+8. **Interceptors-based API Client**: Relocated token loading and header injections into a centralized `apiClient.js` instance, eliminating manual `axiosConfig` configuration.
 
 ---
 
@@ -63,105 +82,41 @@ Chatting-application/
 
 - **Node.js** (LTS recommended) and **npm**
 - **MongoDB** connection string (e.g. MongoDB Atlas)
-- For local full-stack dev: backend and frontend running together; optional `.env` files as below
+- Backend and frontend running concurrently for local development.
 
 ---
 
-## Backend: environment variables
+## Backend: Environment Variables
 
-Create `backend/.env` locally (this file must **never** be committed; it is listed in `.gitignore`).
-
-| Variable     | What to put                                                                                                                                                                          |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `MONGO_URI`  | In **MongoDB Atlas**: cluster → **Connect** → **Drivers**, copy the connection string, then insert your database user’s password. Paste the full string as the value of `MONGO_URI`. |
-| `JWT_SECRET` | A long random string for signing JWTs (e.g. from a password manager or `openssl rand -hex 32`).                                                                                      |
-
-Example:
+Create `backend/.env` locally:
 
 ```env
-MONGO_URI=
-JWT_SECRET=
+PORT=5000
+MONGO_URI=mongodb+srv://...
+JWT_SECRET=some_long_secure_secret_key
 ```
 
-The server reads `MONGO_URI` (see `backend/server.js`). Use a strong `JWT_SECRET` in production.
-
-**GitHub secret scanning:** Do not put real connection strings, passwords, or JWT secrets in `README.md`, issues, or commits. If a credential was pushed, **rotate** it in Atlas and replace `JWT_SECRET`.
+*Note: The application will fail-fast with a detailed error log if any of these variables are missing.*
 
 ---
 
-## Backend: install and run
+## Installation & Running
 
-Open a terminal in the project root, then:
-
+### Backend
+Open a terminal in `backend/` and run:
 ```bash
-cd backend
 npm install
 npm start
 ```
+Starts Express server on `http://localhost:5000` (or `process.env.PORT`).
 
-The API and Socket.io server start via `node server.js`. The listening port is `process.env.PORT` or **10000** by default (see `backend/server.js`). Set `VITE_API_URL` to match, for example `http://localhost:10000`.
-
-Optional (if you add a dev script with nodemon):
-
+### Frontend
+Open a terminal in `frontend/` and run:
 ```bash
-cd backend
-npx nodemon server.js
-```
-
----
-
-## Frontend: environment variables
-
-Create `frontend/.env` (optional; defaults to the deployed Render URL in `src/config.js`):
-
-```env
-VITE_API_URL=https://your-api.example.com
-```
-
-No trailing slash. Restart the Vite dev server after changing this file.
-
----
-
-## Frontend: install, develop, build, preview
-
-```bash
-cd frontend
 npm install
 npm run dev
 ```
-
-Development server (Vite) prints a local URL (typically `http://localhost:5173`).
-
-Production build:
-
-```bash
-cd frontend
-npm run build
-```
-
-Preview the production build locally:
-
-```bash
-cd frontend
-npm run preview
-```
-
----
-
-## End-to-end local workflow (summary)
-
-1. Configure `backend/.env` with `MONGO_URI` and `JWT_SECRET`.
-2. Start backend: `cd backend && npm install && npm start`.
-3. Configure `frontend/.env` with `VITE_API_URL` pointing at your backend (including port).
-4. Start frontend: `cd frontend && npm install && npm run dev`.
-5. Open the Vite URL in the browser, register or log in, then use workspaces and channels.
-
----
-
-## Deployment notes
-
-- **Backend**: Deploy to Render (or similar); set `MONGO_URI` and `JWT_SECRET` in the host environment.
-- **Frontend**: Deploy the static `frontend/dist` output after `npm run build`; set `VITE_API_URL` at build time to your deployed API origin so the client and Socket.io target the correct server.
+Development server starts on `http://localhost:5173`.
 
 ---
 
